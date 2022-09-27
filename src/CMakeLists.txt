@@ -39,3 +39,5 @@ install(FILES example_config/overlaybd.json DESTINATION /etc/overlaybd/)
 install(FILES example_config/cred.json DESTINATION /opt/overlaybd/)
 
 add_subdirectory(tools)
+
+add_subdirectory(userspace)
