@@ -79,6 +79,7 @@ public:
     UNIMPLEMENTED_POINTER(DIR *opendir(const char *) override);
     UNIMPLEMENTED(int symlink(const char *meta_pathname, const char *pathname) override);
     UNIMPLEMENTED(ssize_t readlink(const char *filename, char *buf, size_t bufsize) override);
+    UNIMPLEMENTED(int utime(const char *path, const struct utimbuf *file_times) override);
 
     virtual IFile *open(const char *pathname, int flags) override;
 

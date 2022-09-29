@@ -153,6 +153,7 @@ public:
     UNIMPLEMENTED(int unlink(const char *filename) override);
     UNIMPLEMENTED(int lchown(const char *pathname, uid_t owner, gid_t group) override);
     UNIMPLEMENTED_POINTER(DIR *opendir(const char *) override);
+    UNIMPLEMENTED(int utime(const char *path, const struct utimbuf *file_times) override);
 
 private:
     IFileSystem *m_src_fs; // owned by external class
