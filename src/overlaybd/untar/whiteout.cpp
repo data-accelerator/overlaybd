@@ -40,7 +40,7 @@ int remove_all(photon::fs::IFileSystem *fs, const std::string &path) {
         return -1;
     }
     struct stat statBuf;
-    if (fs->stat(path.c_str(), &statBuf) == 0) {        // get stat
+    if (fs->lstat(path.c_str(), &statBuf) == 0) {        // get stat
         if (S_ISDIR(statBuf.st_mode) == 0) {      // not dir
             fs->unlink(path.c_str());
             return 0;
