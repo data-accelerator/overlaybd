@@ -82,6 +82,7 @@ public:
     UNIMPLEMENTED(int chown(const char *pathname, uid_t owner, gid_t group));
     UNIMPLEMENTED(int lchown(const char *pathname, uid_t owner, gid_t group));
     UNIMPLEMENTED(int utime(const char *path, const struct utimbuf *file_times) override);
+    UNIMPLEMENTED(int mknod(const char *path, mode_t mode, dev_t dev) override);
 
     int statfs(const char *path, struct statfs *buf) {
         return srcFs_ ? srcFs_->statfs(path, buf) : -1;

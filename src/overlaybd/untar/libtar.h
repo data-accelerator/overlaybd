@@ -74,8 +74,8 @@ public:
 	char devminor[8];
 	char prefix[155];
 	char padding[12];
-	char *gnu_longname;
-	char *gnu_longlink;
+	char *gnu_longname = nullptr;
+	char *gnu_longlink = nullptr;
 
 	mode_t get_mode();
 	gid_t get_gid();
@@ -83,12 +83,14 @@ public:
 	int get_mtime() { return oct_to_int(mtime); }
 	int get_crc() { return oct_to_int(chksum); }
 	int get_size() { return oct_to_size(size); }
+	int get_devmajor() { return oct_to_int(devmajor); }
+	int get_devminor() { return oct_to_int(devminor); }
+	char *get_linkname() { return gnu_longlink ? gnu_longlink : linkname; }
 	bool crc_ok() {
 		return (get_crc() == crc_calc() || get_crc() == signed_crc_calc());
 	}
 	int crc_calc();
 	int signed_crc_calc();
-	char *get_linkname() { return gnu_longlink ? gnu_longlink : linkname; }
 };
 
 class Tar {
@@ -97,11 +99,11 @@ public:
 	photon::fs::IFile *file = nullptr; // source
 	int options;
 	TarHeader header;
-	char *th_pathname;
+	char *th_pathname = nullptr;
 	std::set<std::string> unpackedPaths;
 
 	Tar(photon::fs::IFile *file, photon::fs::IFileSystem *fs, int options)
-		: file(file), fs(fs), options(options){
+		: file(file), fs(fs), options(options) {
 	}
 	~Tar() {
 		if (th_pathname != nullptr)
@@ -111,15 +113,18 @@ public:
 	int extract_all();
 
 private:
-	int read_header_internal();
-	int extract_hardlink();
-	int extract_symlink();
-	int extract_dir();
-	int set_file_perms();
-	int extract_file();
 	int read_header();
-	int extract_regfile();
-	int convert_whiteout();
+	int read_header_internal();
+	
+	int extract_file();
+	int extract_regfile(const char *filename);
+	int extract_hardlink(const char *filename);
+	int extract_symlink(const char *filename);
+	int extract_dir(const char *filename);
+	int extract_block_char_fifo(const char *filename);
+	
+	int set_file_perms(const char *filename);
+	int convert_whiteout(const char *filename);
 };
 
 /* constant values for the TAR options field */

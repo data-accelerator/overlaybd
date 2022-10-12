@@ -17,6 +17,7 @@
 #include <string.h>
 #include <sys/param.h>
 #include <sys/types.h>
+#include <sys/sysmacros.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -32,6 +33,23 @@
 #include <photon/fs/path.h>
 
 #define BIT_ISSET(bitmask, bit) ((bitmask) & (bit))
+
+int mkdir_hier(photon::fs::IFileSystem *fs, const std::string_view &dir) {
+	struct stat s;
+	std::string path(dir);
+    if (fs->lstat(path.c_str(), &s) == 0) {
+		if (S_ISDIR(s.st_mode)) {
+			// LOG_DEBUG("skip mkdir `", path.c_str());
+			return 0;
+		} else {
+			errno = ENOTDIR;
+			// LOG_ERROR("mkdir ` failed, `", path.c_str(), strerror(errno));
+			return -1;
+		}
+    }
+
+	return photon::fs::mkdir_recursive(dir, fs, 0777);
+}
 
 int Tar::read_header_internal() {
 	int i;
@@ -70,14 +88,13 @@ int Tar::read_header_internal() {
 	return i;
 }
 
-
 int Tar::read_header() {
 	size_t sz, j, blocks;
 	char *ptr;
 
-	if (header.gnu_longname != NULL)
+	if (header.gnu_longname != nullptr)
 		free(header.gnu_longname);
-	if (header.gnu_longlink != NULL)
+	if (header.gnu_longlink != nullptr)
 		free(header.gnu_longlink);
 	memset(&(header), 0, sizeof(TarHeader));
 
@@ -100,7 +117,7 @@ int Tar::read_header() {
 		}
 
 		header.gnu_longlink = (char *)malloc(blocks * T_BLOCKSIZE);
-		if (header.gnu_longlink == NULL)
+		if (header.gnu_longlink == nullptr)
 			return -1;
 
 		for (j = 0, ptr = header.gnu_longlink; j < blocks; j++, ptr += T_BLOCKSIZE) {
@@ -129,7 +146,7 @@ int Tar::read_header() {
 			return -1;
 		}
 		header.gnu_longname = (char *)malloc(blocks * T_BLOCKSIZE);
-		if (header.gnu_longname == NULL)
+		if (header.gnu_longname == nullptr)
 			return -1;
 
 		for (j = 0, ptr = header.gnu_longname; j < blocks; j++, ptr += T_BLOCKSIZE) {
@@ -152,7 +169,42 @@ int Tar::read_header() {
 	return 0;
 }
 
+int Tar::set_file_perms(const char *filename) {
+	mode_t mode = header.get_mode();
+	uid_t uid = header.get_uid();
+	gid_t gid = header.get_gid();
+	struct utimbuf ut;
+	ut.modtime = ut.actime = header.get_mtime();
 
+	// skip symlink
+	struct stat s;
+	if (fs->lstat(filename, &s) == 0 && S_ISLNK(s.st_mode)) {
+		return 0;
+	}
+
+	/* change owner/group */
+	if (geteuid() == 0)
+#ifdef HAVE_LCHOWN
+		if (fs->lchown(filename, uid, gid) == -1) {
+#else /* ! HAVE_LCHOWN */
+
+		if (fs->chown(filename, uid, gid) == -1) {
+#endif /* HAVE_LCHOWN */
+			return -1;
+		}
+
+	/* change access/modification time */
+	if (fs->utime(filename, &ut) == -1) {
+		return -1;
+	}
+
+	/* change permissions */
+	if (fs->chmod(filename, mode) == -1) {
+		return -1;
+	}
+
+	return 0;
+}
 
 int Tar::extract_all() {
 
@@ -162,50 +214,32 @@ int Tar::extract_all() {
 
 	std::set<std::string> unpackedPaths;
 	while ((i = read_header()) == 0) {
-		if (extract_file() != 0)
+		if (extract_file() != 0) {
+			LOG_ERROR("extract failed, filename `, `", get_pathname(), strerror(errno));
 			return -1;
+		}
 	}
+
+	// TODO: change time for all dir
 
 	return (i == 1 ? 0 : -1);
 }
 
-
-
-int Tar::set_file_perms() {
-	char *filename = get_pathname();
-	mode_t mode = header.get_mode();
-	uid_t uid = header.get_uid();
-	gid_t gid = header.get_gid();
-	struct utimbuf ut;
-	ut.modtime = ut.actime = header.get_mtime();
-
-	/* change owner/group */
-	if (geteuid() == 0)
-#ifdef HAVE_LCHOWN
-		if (fs->lchown(filename, uid, gid) == -1) {
-#else /* ! HAVE_LCHOWN */
-
-		if (!TH_ISSYM(header) && fs->chown(filename, uid, gid) == -1) {
-#endif /* HAVE_LCHOWN */
-			return -1;
-		}
-
-	/* change access/modification time */
-	if (!TH_ISSYM(header) && fs->utime(filename, &ut) == -1) {
-		return -1;
-	}
-
-	/* change permissions */
-	if (!TH_ISSYM(header) && fs->chmod(filename, mode) == -1) {
-		return -1;
-	}
-
-	return 0;
-}
-
 int Tar::extract_file() {
 	int i;
-	auto cwres = convert_whiteout();
+	char *filename = get_pathname();
+
+	// TODO: normalize name, resove symlinks for root + filename
+
+	// ensure parent directory exists or is created. 
+	// TODO: copyUpXAttrs?
+	photon::fs::Path p(filename);
+	if (mkdir_hier(fs, p.dirname()) < 0) {
+		return -1;
+	}
+
+	// whiteout files by removing the target files.
+	auto cwres = convert_whiteout(filename);
 	if (cwres < 0) {
 		return -1;
 	}
@@ -213,62 +247,68 @@ int Tar::extract_file() {
 		return 0;
 	}
 
-	if (options & TAR_NOOVERWRITE) {
-		struct stat s;
-		char *realname = get_pathname();
-		if (fs->lstat(realname, &s) == 0 || errno != ENOENT) {
+	// check file exist
+	std::string npath(filename);
+	if (npath.back() == '/') {
+		npath = npath.substr(0, npath.size() - 1);
+	}
+	struct stat s;
+	if (fs->lstat(npath.c_str(), &s) == 0 || errno != ENOENT) {
+		if (options & TAR_NOOVERWRITE) {
 			errno = EEXIST;
 			return -1;
+		} else {
+			if (!(S_ISDIR(s.st_mode) && TH_ISDIR(header))) {
+				// LOG_DEBUG("remove exist file `", npath.c_str());
+				if (fs->unlink(npath.c_str()) == -1 && errno != ENOENT) {
+					errno = EEXIST;
+					return -1;
+				}
+			}
 		}
 	}
 
 	if (TH_ISDIR(header)) {
-		i = extract_dir();
+		i = extract_dir(filename);
 		if (i == 1)
 			i = 0;
 	}
+	else if (TH_ISREG(header))
+		i = extract_regfile(filename);
 	else if (TH_ISLNK(header))
-		i = extract_hardlink();
+		i = extract_hardlink(filename);
 	else if (TH_ISSYM(header))
-		i = extract_symlink();
-	else if (TH_ISCHR(header)) {
-		LOG_WARN("ignore chardev");
+		i = extract_symlink(filename);
+	else if (TH_ISCHR(header) || TH_ISBLK(header) || TH_ISFIFO(header))
+		i = extract_block_char_fifo(filename);
+	else {
+		LOG_WARN("ignore unimplemented type `, filename `", header.typeflag, filename);
 		i = 0;
-	} else if (TH_ISBLK(header)) {
-		LOG_WARN("ignore blockdev");
-		i = 0;
-	} else if (TH_ISFIFO(header)) {
-		LOG_WARN("ignore fifo");
-		i = 0;
-	} else /* if (TH_ISREG(t)) */
-		i = extract_regfile();
+	}
 
-	if (i != 0)
+	if (i != 0) {
 		return i;
+	}
 
-	i = set_file_perms();
-	if (i != 0)
+	i = set_file_perms(filename);
+	if (i != 0) {
+		LOG_ERROR("set perms failed, filename `, `", filename, strerror(errno));
 		return i;
+	}
 
-	unpackedPaths.insert(get_pathname());
+	unpackedPaths.insert(filename);
 	return 0;
 }
 
-
-int Tar::extract_regfile() {
+int Tar::extract_regfile(const char *filename) {
 	ssize_t i, k;
 	char buf[T_BLOCKSIZE];
-	char *filename = get_pathname();
 	mode_t mode = header.get_mode();
 	size_t size = header.get_size();
 	uid_t uid = header.get_uid();
 	gid_t gid = header.get_gid();
 
-	photon::fs::Path p(filename);
-	if (photon::fs::mkdir_recursive(p.dirname(), fs, 0777) < 0) {
-		return -1;
-	}
-
+	LOG_DEBUG("  ==> extracting: ` (mode `, uid `, gid `, ` bytes)\n", filename, mode, uid, gid, size);
 	photon::fs::IFile *fout = fs->open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 	if (fout == nullptr) {
 		return -1;
@@ -307,48 +347,36 @@ int Tar::extract_regfile() {
 	return 0;
 }
 
-
-int Tar::extract_hardlink() {
-	char *filename = get_pathname();
+int Tar::extract_hardlink(const char *filename) {
 	auto mode = header.get_mode();
-	photon::fs::Path p(filename);
-	if (photon::fs::mkdir_recursive(p.dirname(), fs, 0777) < 0) {
-		return -1;
-	}
-	char *linktgt = safer_name_suffix(header.get_linkname());
+	// TODO: hardlinkRootPath
+
+	// char *linktgt = safer_name_suffix(header.get_linkname());
+	char *linktgt = header.get_linkname();
+	LOG_DEBUG("  ==> extracting: ` (link to `)\n", filename, linktgt);
 	if (fs->link(linktgt, filename) == -1) {
+		LOG_ERROR("link failed, `", strerror(errno));
 		return -1;
 	}
 	return 0;
 }
 
-
-int Tar::extract_symlink() {
-	char *filename = get_pathname();
+int Tar::extract_symlink(const char *filename) {
 	auto mode = header.get_mode();
-	photon::fs::Path p(filename);
-	if (photon::fs::mkdir_recursive(p.dirname(), fs, 0777) < 0) {
-		return -1;
-	}
-
-	if (fs->unlink(filename) == -1 && errno != ENOENT)
-		return -1;
-	char *linktgt = safer_name_suffix(header.get_linkname());
+	// char *linktgt = safer_name_suffix(header.get_linkname());
+	char *linktgt = header.get_linkname();
+	LOG_DEBUG("  ==> extracting: ` (symlink to `)\n", filename, linktgt);
 	if (fs->symlink(linktgt, filename) == -1) {
+		LOG_ERROR("symlink failed, `", strerror(errno));
 		return -1;
 	}
 	return 0;
 }
 
-
-int Tar::extract_dir() {
-	char *filename = get_pathname();
+int Tar::extract_dir(const char *filename) {
 	mode_t mode = header.get_mode();
-	photon::fs::Path p(filename);
-	if (photon::fs::mkdir_recursive(p.dirname(), fs, 0777) < 0) {
-		return -1;
-	}
 
+	LOG_DEBUG("  ==> extracting: ` (mode `, directory)\n", filename, mode);
 	if (fs->mkdir(filename, mode) < 0) {
 		if (errno == EEXIST) {
 			if (fs->chmod(filename, mode) < 0) {
@@ -360,5 +388,19 @@ int Tar::extract_dir() {
 			return -1;
 		}
 	}
+	return 0;
+}
+
+int Tar::extract_block_char_fifo(const char *filename) {
+	auto mode = header.get_mode();
+	auto devmaj = header.get_devmajor();
+	auto devmin = header.get_devminor();
+
+	LOG_DEBUG("  ==> extracting: ` (block/char/fifo `,`)\n", filename, devmaj, devmin);
+	if (fs->mknod(filename, mode, makedev(devmaj, devmin)) == -1) {
+		LOG_ERROR("block/char/fifo failed, `", strerror(errno));
+		return -1;
+	}
+
 	return 0;
 }
