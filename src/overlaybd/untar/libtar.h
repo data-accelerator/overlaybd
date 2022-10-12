@@ -25,6 +25,7 @@
 #include <photon/fs/filesystem.h>
 #include <set>
 #include <string>
+#include <list>
 
 #define T_BLOCKSIZE		512
 #define T_NAMELEN		100
@@ -101,6 +102,7 @@ public:
 	TarHeader header;
 	char *th_pathname = nullptr;
 	std::set<std::string> unpackedPaths;
+	std::list<std::pair<std::string, int>> dirs;	// <path, utime>
 
 	Tar(photon::fs::IFile *file, photon::fs::IFileSystem *fs, int options)
 		: file(file), fs(fs), options(options) {

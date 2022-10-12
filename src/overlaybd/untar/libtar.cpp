@@ -48,7 +48,7 @@ int mkdir_hier(photon::fs::IFileSystem *fs, const std::string_view &dir) {
 		}
     }
 
-	return photon::fs::mkdir_recursive(dir, fs, 0777);
+	return photon::fs::mkdir_recursive(dir, fs, 0755);
 }
 
 int Tar::read_header_internal() {
@@ -173,33 +173,39 @@ int Tar::set_file_perms(const char *filename) {
 	mode_t mode = header.get_mode();
 	uid_t uid = header.get_uid();
 	gid_t gid = header.get_gid();
-	struct utimbuf ut;
-	ut.modtime = ut.actime = header.get_mtime();
-
-	// skip symlink
-	struct stat s;
-	if (fs->lstat(filename, &s) == 0 && S_ISLNK(s.st_mode)) {
-		return 0;
-	}
+	struct timeval tv[2];
+	tv[0].tv_sec = tv[1].tv_sec = header.get_mtime();
+	tv[0].tv_usec = tv[1].tv_usec = 0;
 
 	/* change owner/group */
-	if (geteuid() == 0)
-#ifdef HAVE_LCHOWN
+	if (geteuid() == 0) {
 		if (fs->lchown(filename, uid, gid) == -1) {
-#else /* ! HAVE_LCHOWN */
-
-		if (fs->chown(filename, uid, gid) == -1) {
-#endif /* HAVE_LCHOWN */
+			LOG_ERROR("lchown failed, filename `, `", filename, strerror(errno));
 			return -1;
 		}
+	}
 
 	/* change access/modification time */
-	if (fs->utime(filename, &ut) == -1) {
+	if (fs->lutimes(filename, tv) == -1) {
+		LOG_ERROR("lutimes failed, filename `, `", filename, strerror(errno));
 		return -1;
 	}
 
 	/* change permissions */
+	// skip symlink
+	// NOTE: Allow hardlink to the softlink, not the real one. For example,
+	//
+	//	touch /tmp/zzz
+	//	ln -s /tmp/zzz /tmp/xxx
+	//	ln /tmp/xxx /tmp/yyy
+	//
+	// /tmp/yyy should be softlink which be same of /tmp/xxx, not /tmp/zzz.
+	struct stat s;
+	if (fs->lstat(filename, &s) == 0 && S_ISLNK(s.st_mode)) {
+		return 0;
+	}
 	if (fs->chmod(filename, mode) == -1) {
+		LOG_ERROR("chmod failed `", strerror(errno));
 		return -1;
 	}
 
@@ -207,20 +213,30 @@ int Tar::set_file_perms(const char *filename) {
 }
 
 int Tar::extract_all() {
-
-	char *filename;
-	char buf[MAXPATHLEN];
 	int i;
+	unpackedPaths.clear();
+	dirs.clear();
 
-	std::set<std::string> unpackedPaths;
 	while ((i = read_header()) == 0) {
 		if (extract_file() != 0) {
 			LOG_ERROR("extract failed, filename `, `", get_pathname(), strerror(errno));
 			return -1;
 		}
+		if (TH_ISDIR(header)) {
+			dirs.emplace_back(std::make_pair(std::string(get_pathname()), header.get_mtime()));
+		}
 	}
 
-	// TODO: change time for all dir
+	// change time for all dir
+	for (auto dir : dirs) {
+		std::string path = dir.first;
+		struct utimbuf ut;
+		ut.modtime = ut.actime = dir.second;
+		if (fs->utime(path.c_str(), &ut) == -1) {
+			LOG_ERROR("utime failed, filename `, `", dir.first.c_str(), strerror(errno));
+			return -1;
+		}
+	}
 
 	return (i == 1 ? 0 : -1);
 }
@@ -232,7 +248,6 @@ int Tar::extract_file() {
 	// TODO: normalize name, resove symlinks for root + filename
 
 	// ensure parent directory exists or is created. 
-	// TODO: copyUpXAttrs?
 	photon::fs::Path p(filename);
 	if (mkdir_hier(fs, p.dirname()) < 0) {
 		return -1;
@@ -292,7 +307,6 @@ int Tar::extract_file() {
 
 	i = set_file_perms(filename);
 	if (i != 0) {
-		LOG_ERROR("set perms failed, filename `, `", filename, strerror(errno));
 		return i;
 	}
 
