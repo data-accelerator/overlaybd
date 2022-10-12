@@ -72,8 +72,7 @@ int remove_all(photon::fs::IFileSystem *fs, const std::string &path) {
 // 1 whiteout done
 // 0 not whiteout
 // -1 error
-int Tar::convert_whiteout() {
-    char *filename = get_pathname();
+int Tar::convert_whiteout(const char *filename) {
 	photon::fs::Path p(filename);
 	auto dir = std::string(p.dirname());
 	auto base = p.basename();
@@ -92,7 +91,7 @@ int Tar::convert_whiteout() {
 		return 1;
 	}
 	if (base.substr(0, whiteoutPrefix.size()) == whiteoutPrefix) {
-		auto opath = dir + "/" + std::string(base.data(), whiteoutPrefix.size());
+		auto opath = dir + std::string(base.data() + whiteoutPrefix.size());
 		remove_all(fs, opath);
 		return 1;
 	}
