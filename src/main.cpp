@@ -20,7 +20,7 @@
 #include <photon/fs/filesystem.h>
 #include <photon/net/curl.h>
 #include <photon/io/fd-events.h>
-#include <photon/io/signalfd.h>
+#include <photon/io/signal.h>
 #include <photon/photon.h>
 #include <photon/thread/thread.h>
 #include <photon/thread/thread-pool.h>

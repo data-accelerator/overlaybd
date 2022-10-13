@@ -1629,6 +1629,12 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			// TBD
 			return 0;
 		}
+		int utimes(const char *path, const struct timeval times[2]) override {
+			return 0;
+		}
+    	int lutimes(const char *path, const struct timeval times[2]) override {
+			return 0;
+		}
         int mknod(const char *path, mode_t mode, dev_t dev) override{
 			return do_ext2fs_mknod(fs, path, mode, dev);
 		}
