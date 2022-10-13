@@ -1,4 +1,5 @@
 #include <ext2fs/ext2fs.h>
+#include <utime.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -571,7 +572,7 @@ static int update_mtime(ext2_filsys fs, ext2_ino_t ino,
 	return 0;
 }
 
-static errcode_t update_xtime(ext2_file_t file, bool a, bool c, bool m) {
+static errcode_t update_xtime(ext2_file_t file, bool a, bool c, bool m, struct timespec *file_time = nullptr) {
 	errcode_t err = 0;
 	ext2_filsys fs = ext2fs_file_get_fs(file);
 	ext2_ino_t ino = ext2fs_file_get_inode_num(file);
@@ -579,7 +580,11 @@ static errcode_t update_xtime(ext2_file_t file, bool a, bool c, bool m) {
 	err = ext2fs_read_inode(fs, ino, inode);
 	if (err) return err;
 	struct timespec now;
-	get_now(&now);
+	if (file_time == nullptr) {
+		get_now(&now);
+	} else {
+		now = *file_time;
+	}
 	if (a) {
 		inode->i_atime = now.tv_sec;
 	}
@@ -658,33 +663,34 @@ out:
 
 //-----------------------------------------------------------------------------
 
-long do_ext2fs_open_file(ext2_filsys fs, const char* path, unsigned int flags, unsigned int mode) {
+ext2_file_t do_ext2fs_open_file(ext2_filsys fs, const char* path, unsigned int flags, unsigned int mode) {
 	ext2_ino_t ino = string_to_inode(fs, path, !(flags & O_NOFOLLOW));
 	LOG_INFO(VALUE(ino));
 	errcode_t ret;
 	if (ino == 0) {
 		if (!(flags & O_CREAT)) {
-			return -ENOENT;
+			LOG_ERRNO_RETURN(ENOENT, nullptr, "");
 		}
 		ret = create_file(fs, path, mode, &ino);
 		if (ret) {
-			LOG_ERROR("failed to create file ", VALUE(ret), VALUE(path));
-			return -ret;
+			LOG_ERRNO_RETURN(-translate_error(fs, ino, ret), nullptr, "failed to create file ", VALUE(ret), VALUE(path));
 		}
 	} else if (flags & O_EXCL) {
-		return -EEXIST;
+		LOG_ERRNO_RETURN(EEXIST, nullptr, "");
 	}
 	if ((flags & O_DIRECTORY) && ext2fs_check_directory(fs, ino)) {
-		return -ENOTDIR;
+		LOG_ERRNO_RETURN(ENOTDIR, nullptr, "");
 	}
 	ext2_file_t file;
 	ret = ext2fs_file_open(fs, ino, translate_open_flags(flags), &file);
-	if (ret) return -ret;
+	if (ret) {
+		LOG_ERRNO_RETURN(-translate_error(fs, ino, ret), nullptr, "");
+	}
 	if (flags & O_TRUNC) {
 		ret = ext2fs_file_set_size2(file, 0);
-		if (ret) return -ret;
+		LOG_ERRNO_RETURN(-translate_error(fs, ino, ret), nullptr, "");
 	}
-	return (long)file;
+	return file;
 }
 
 long do_ext2fs_read(
@@ -1351,7 +1357,9 @@ errcode_t do_ext2fs_chown(
 	if (ret) return -ret;
 	// keep only the lower 16 bits
 	inode->i_uid = uid & 0xFFFF;
+	ext2fs_set_i_uid_high(*inode, uid >> 16);
 	inode->i_gid = gid & 0xFFFF;
+	ext2fs_set_i_gid_high(*inode, gid >> 16);
 	increment_version(inode);
 	ret = ext2fs_write_inode(fs, ino, inode);
 	return -ret;
@@ -1496,7 +1504,7 @@ int test() {
 	// 	LOG_ERRNO_RETURN(0, -1, "failed do_ext2fs_unlink");
 	// }
 
-	ext2_file_t file = (ext2_file_t) do_ext2fs_open_file(fs, "/toodir/yy", O_CREAT | O_RDWR, 0644);
+	ext2_file_t file = do_ext2fs_open_file(fs, "/to", 0, 0644);
 	if (!file) {
 		LOG_ERRNO_RETURN(0, -1, "failed to do_ext2fs_open_file, ret=`", (errcode_t) file);
 	}
@@ -1544,32 +1552,32 @@ class UserSpaceFile : public photon::fs::IFile {
 	public:
 		UserSpaceFile(ext2_file_t _file) :file(_file) {}
 
-		ssize_t pread(void *buf, size_t count, off_t offset) {
+		ssize_t pread(void *buf, size_t count, off_t offset) override {
 			return do_ext2fs_read(file, O_RDONLY, (char *) buf, count, offset);
 		}
-		ssize_t pwrite(const void *buf, size_t count, off_t offset) {
+		ssize_t pwrite(const void *buf, size_t count, off_t offset) override {
 			return do_ext2fs_write(file, O_RDWR, (const char *) buf, count, offset);
 		}
-		int fchmod(mode_t mode) {
+		int fchmod(mode_t mode) override {
 			return do_ext2fs_chmod(file, mode);
 		}
-		int fchown(uid_t owner, gid_t group) {
+		int fchown(uid_t owner, gid_t group) override {
 			return do_ext2fs_chown(file, owner, group);
 		}
 
-		UNIMPLEMENTED_POINTER(IFileSystem* filesystem());
-		UNIMPLEMENTED(ssize_t preadv(const struct iovec *iov, int iovcnt, off_t offset));
-        UNIMPLEMENTED(ssize_t pwritev(const struct iovec *iov, int iovcnt, off_t offset));
-		UNIMPLEMENTED(off_t lseek(off_t offset, int whence));
-		UNIMPLEMENTED(int fsync());
-        UNIMPLEMENTED(int fdatasync());
-        UNIMPLEMENTED(int fstat(struct stat *buf));
-        UNIMPLEMENTED(int ftruncate(off_t length));
-		UNIMPLEMENTED(int close());
-		UNIMPLEMENTED(ssize_t read(void *buf, size_t count));
-		UNIMPLEMENTED(ssize_t readv(const struct iovec *iov, int iovcnt));
-		UNIMPLEMENTED(ssize_t write(const void *buf, size_t count));
-    	UNIMPLEMENTED(ssize_t writev(const struct iovec *iov, int iovcnt));
+		UNIMPLEMENTED_POINTER(IFileSystem* filesystem() override);
+		UNIMPLEMENTED(ssize_t preadv(const struct iovec *iov, int iovcnt, off_t offset) override);
+        UNIMPLEMENTED(ssize_t pwritev(const struct iovec *iov, int iovcnt, off_t offset) override);
+		UNIMPLEMENTED(off_t lseek(off_t offset, int whence) override);
+		UNIMPLEMENTED(int fsync() override);
+        UNIMPLEMENTED(int fdatasync() override);
+        UNIMPLEMENTED(int fstat(struct stat *buf) override);
+        UNIMPLEMENTED(int ftruncate(off_t length) override);
+		UNIMPLEMENTED(int close() override);
+		UNIMPLEMENTED(ssize_t read(void *buf, size_t count) override);
+		UNIMPLEMENTED(ssize_t readv(const struct iovec *iov, int iovcnt) override);
+		UNIMPLEMENTED(ssize_t write(const void *buf, size_t count) override);
+    	UNIMPLEMENTED(ssize_t writev(const struct iovec *iov, int iovcnt) override);
 	private:
 		ext2_file_t file;
 };
@@ -1597,11 +1605,11 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			}
 		}
 		IFile* open(const char *pathname, int flags, mode_t mode) override {
-			long ret = do_ext2fs_open_file(ext2_fs, pathname, flags, mode);
-			if (ret < 0) {
-				LOG_ERROR("failed do_ext2fs_open_file, ret=`", ret);
+			ext2_file_t file = do_ext2fs_open_file(ext2_fs, pathname, flags, mode);
+			if (!file) {
+				return nullptr;
 			}
-			return new UserSpaceFile((ext2_file_t) ret);
+			return new UserSpaceFile(file);
 		}
 		IFile* open(const char *pathname, int flags) override {
 			return open(pathname, flags, 0666);
@@ -1625,18 +1633,48 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 		int unlink(const char *filename) override{
 			return do_ext2fs_unlink(fs, filename);
 		}
-		int utime(const char *path, const struct utimbuf *file_times) override{
-			// TBD
-			return 0;
-		}
-		int utimes(const char *path, const struct timeval times[2]) override {
-			return 0;
-		}
-    	int lutimes(const char *path, const struct timeval times[2]) override {
-			return 0;
-		}
-        int mknod(const char *path, mode_t mode, dev_t dev) override{
+		int mknod(const char *path, mode_t mode, dev_t dev) override{
 			return do_ext2fs_mknod(fs, path, mode, dev);
+		}
+		int utime(const char *path, const struct utimbuf *file_times) override{
+			ext2_file_t file = do_ext2fs_open_file(fs, path, O_RDWR, 0666);
+			timespec tm{};
+			if (!file) {
+				return -1;
+			}
+			tm.tv_sec = file_times->actime;
+			update_xtime(file, true, false, false, &tm);
+			tm.tv_sec = file_times->modtime;
+			update_xtime(file, false, false, true, &tm);
+			update_xtime(file, false, true, false);
+			return 0;
+		}
+		int lutimes(const char *path, const struct timeval tv[2]) override{
+			ext2_file_t file = do_ext2fs_open_file(fs, path, O_RDWR | O_NOFOLLOW, 0666);
+			timespec tm{};
+			if (!file) {
+				return -1;
+			}
+			tm = {tv[0].tv_sec, tv[0].tv_usec};
+			update_xtime(file, true, false, false, &tm);
+			tm = {tv[1].tv_sec, tv[1].tv_usec};
+			update_xtime(file, false, false, true, &tm);
+			update_xtime(file, false, true, false);
+			return 0;
+		}
+		int chown(const char *pathname, uid_t owner, gid_t group) override{
+			IFile *file = this->open(pathname, 0);
+			if (file == nullptr) {
+				return -1;
+			}
+			return file->fchown(owner, group);
+		}
+		int lchown(const char *pathname, uid_t owner, gid_t group) override{
+			IFile *file = this->open(pathname, O_NOFOLLOW);
+			if (file == nullptr) {
+				return -1;
+			}
+			return file->fchown(owner, group);
 		}
 
 		IFileSystem* filesystem() {
@@ -1646,8 +1684,6 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 		UNIMPLEMENTED_POINTER(IFile *creat(const char *, mode_t) override);
 		UNIMPLEMENTED(ssize_t readlink(const char *filename, char *buf, size_t bufsize) override);
 		UNIMPLEMENTED(int chmod(const char *, mode_t) override);
-    	UNIMPLEMENTED(int chown(const char *, uid_t, gid_t) override);
-		UNIMPLEMENTED(int lchown(const char *pathname, uid_t owner, gid_t group) override);
 		UNIMPLEMENTED(int statfs(const char *path, struct statfs *buf) override);
     	UNIMPLEMENTED(int statvfs(const char *path, struct statvfs *buf) override);
 		UNIMPLEMENTED(int lstat(const char *path, struct stat *buf) override);
