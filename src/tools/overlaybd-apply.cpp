@@ -65,6 +65,10 @@ int main(int argc, char **argv) {
 
     auto imgservice = create_image_service();
     ImageFile *imgfile = imgservice->create_image_file(image_config_path.c_str());
+    if (imgfile == nullptr) {
+        fprintf(stderr, "failed to create image file\n");
+        exit(-1);
+    }
     auto target = new_userspace_fs(imgfile);
 
     auto tarf = open_file(input_path.c_str(), O_RDONLY, 0666);
@@ -73,7 +77,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "failed to extract\n");
         exit(-1);
     }
+
+    delete target;
     delete imgfile;
+
 
     return 0;
 }

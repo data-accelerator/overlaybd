@@ -354,8 +354,6 @@ static errcode_t ufs_zeroout(io_channel channel, unsigned long long block, unsig
 	return 0;
 }
 
-struct struct_ext2_filsys *fs;
-
 int init_img() {
 	char path[] = "/home/zhuangbowei.zbw/tmp/ext2fs/test.img";
 	ufs_file = photon::fs::open_localfile_adaptor(path, O_RDWR, 0644, 0);
@@ -1552,6 +1550,10 @@ class UserSpaceFile : public photon::fs::IFile {
 	public:
 		UserSpaceFile(ext2_file_t _file) :file(_file) {}
 
+		~UserSpaceFile() {
+			close();
+		}
+
 		ssize_t pread(void *buf, size_t count, off_t offset) override {
 			return do_ext2fs_read(file, O_RDONLY, (char *) buf, count, offset);
 		}
@@ -1564,6 +1566,9 @@ class UserSpaceFile : public photon::fs::IFile {
 		int fchown(uid_t owner, gid_t group) override {
 			return do_ext2fs_chown(file, owner, group);
 		}
+		int close() override {
+			return ext2fs_file_close(file);
+		}
 
 		UNIMPLEMENTED_POINTER(IFileSystem* filesystem() override);
 		UNIMPLEMENTED(ssize_t preadv(const struct iovec *iov, int iovcnt, off_t offset) override);
@@ -1573,7 +1578,6 @@ class UserSpaceFile : public photon::fs::IFile {
         UNIMPLEMENTED(int fdatasync() override);
         UNIMPLEMENTED(int fstat(struct stat *buf) override);
         UNIMPLEMENTED(int ftruncate(off_t length) override);
-		UNIMPLEMENTED(int close() override);
 		UNIMPLEMENTED(ssize_t read(void *buf, size_t count) override);
 		UNIMPLEMENTED(ssize_t readv(const struct iovec *iov, int iovcnt) override);
 		UNIMPLEMENTED(ssize_t write(const void *buf, size_t count) override);
@@ -1604,8 +1608,11 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 				return;
 			}
 		}
+		~UserSpaceFileSystem() {
+			ext2fs_close(fs);
+		}
 		IFile* open(const char *pathname, int flags, mode_t mode) override {
-			ext2_file_t file = do_ext2fs_open_file(ext2_fs, pathname, flags, mode);
+			ext2_file_t file = do_ext2fs_open_file(fs, pathname, flags, mode);
 			if (!file) {
 				return nullptr;
 			}
@@ -1649,6 +1656,9 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			update_xtime(file, false, true, false);
 			return 0;
 		}
+		int utimes(const char *path, const struct timeval tv[2]) override{
+			return 0;
+		}
 		int lutimes(const char *path, const struct timeval tv[2]) override{
 			ext2_file_t file = do_ext2fs_open_file(fs, path, O_RDWR | O_NOFOLLOW, 0666);
 			timespec tm{};
@@ -1667,6 +1677,7 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			if (file == nullptr) {
 				return -1;
 			}
+			DEFER({delete file;});
 			return file->fchown(owner, group);
 		}
 		int lchown(const char *pathname, uid_t owner, gid_t group) override{
@@ -1674,7 +1685,16 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			if (file == nullptr) {
 				return -1;
 			}
+			DEFER({delete file;});
 			return file->fchown(owner, group);
+		}
+		int chmod(const char *pathname, mode_t mode) override {
+			IFile *file = this->open(pathname, O_NOFOLLOW);
+			if (file == nullptr) {
+				return -1;
+			}
+			DEFER({delete file;});
+			return file->fchmod(mode);
 		}
 
 		IFileSystem* filesystem() {
@@ -1683,7 +1703,6 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 
 		UNIMPLEMENTED_POINTER(IFile *creat(const char *, mode_t) override);
 		UNIMPLEMENTED(ssize_t readlink(const char *filename, char *buf, size_t bufsize) override);
-		UNIMPLEMENTED(int chmod(const char *, mode_t) override);
 		UNIMPLEMENTED(int statfs(const char *path, struct statfs *buf) override);
     	UNIMPLEMENTED(int statvfs(const char *path, struct statvfs *buf) override);
 		UNIMPLEMENTED(int lstat(const char *path, struct stat *buf) override);
@@ -1693,7 +1712,7 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 		UNIMPLEMENTED(int syncfs() override);
 		UNIMPLEMENTED_POINTER(DIR *opendir(const char *) override);
 	private:
-		ext2_filsys ext2_fs;
+		ext2_filsys fs;
 };
 
 
