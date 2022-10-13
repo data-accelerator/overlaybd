@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
     bool compress_zfile = false;
 
     CLI::App app{"this is overlaybd-apply, apply OCIv1 tar layer to overlaybd format"};
-    app.add_option("-i", input_path, "input OCIv1 tar layer path");
+    app.add_option("input_path", input_path, "input OCIv1 tar layer path")->type_name("FILEPATH")->check(CLI::ExistingFile)->required();
     app.add_option("image_config_path", image_config_path, "overlaybd image config path")->type_name("FILEPATH")->check(CLI::ExistingFile)->required();
     CLI11_PARSE(app, argc, argv);
 
@@ -69,7 +69,11 @@ int main(int argc, char **argv) {
 
     auto tarf = open_file(input_path.c_str(), O_RDONLY, 0666);
     auto tar = new Tar(tarf, target, 0);
-    tar->extract_all();
+    if (tar->extract_all() < 0) {
+        fprintf(stderr, "failed to extract\n");
+        exit(-1);
+    }
+    delete imgfile;
 
     return 0;
 }
