@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <vector>
+#include <sys/sysmacros.h>
 
 #include <photon/photon.h>
 #include <photon/common/alog.h>
@@ -203,35 +204,35 @@ static unsigned int translate_open_flags(unsigned int js_flags) {
 
 //---------------------------------------------
 
-static errcode_t lsmt_open(const char *name, int flags, io_channel *channel);
-static errcode_t lsmt_close(io_channel channel);
+static errcode_t ufs_open(const char *name, int flags, io_channel *channel);
+static errcode_t ufs_close(io_channel channel);
 static errcode_t set_blksize(io_channel channel, int blksize);
-static errcode_t lsmt_read_blk(io_channel channel, unsigned long block, int count, void *buf);
-static errcode_t lsmt_read_blk64(io_channel channel, unsigned long long block, int count, void *buf);
-static errcode_t lsmt_write_blk(io_channel channel, unsigned long block, int count, const void *buf);
-static errcode_t lsmt_write_blk64(io_channel channel, unsigned long long block, int count, const void *buf);
-static errcode_t lsmt_flush(io_channel channel);
-static errcode_t lsmt_discard(io_channel channel, unsigned long long block, unsigned long long count);
-static errcode_t lsmt_cache_readahead(io_channel channel, unsigned long long block, unsigned long long count);
-static errcode_t lsmt_zeroout(io_channel channel, unsigned long long block, unsigned long long count);
+static errcode_t ufs_read_blk(io_channel channel, unsigned long block, int count, void *buf);
+static errcode_t ufs_read_blk64(io_channel channel, unsigned long long block, int count, void *buf);
+static errcode_t ufs_write_blk(io_channel channel, unsigned long block, int count, const void *buf);
+static errcode_t ufs_write_blk64(io_channel channel, unsigned long long block, int count, const void *buf);
+static errcode_t ufs_flush(io_channel channel);
+static errcode_t ufs_discard(io_channel channel, unsigned long long block, unsigned long long count);
+static errcode_t ufs_cache_readahead(io_channel channel, unsigned long long block, unsigned long long count);
+static errcode_t ufs_zeroout(io_channel channel, unsigned long long block, unsigned long long count);
 
 static struct struct_io_manager struct_lsmt_manager = {
 	.magic				= EXT2_ET_MAGIC_IO_MANAGER,
 	.name				= "LSMT I/O Manager",
-	.open				= lsmt_open,
-	.close				= lsmt_close,
+	.open				= ufs_open,
+	.close				= ufs_close,
 	.set_blksize		= set_blksize,
-	.read_blk			= lsmt_read_blk,
-	.write_blk			= lsmt_write_blk,
-	.flush				= lsmt_flush,
-	.read_blk64			= lsmt_read_blk64,
-	.write_blk64		= lsmt_write_blk64,
-	.discard			= lsmt_discard,
-	.cache_readahead	= lsmt_cache_readahead,
-	.zeroout			= lsmt_zeroout,
+	.read_blk			= ufs_read_blk,
+	.write_blk			= ufs_write_blk,
+	.flush				= ufs_flush,
+	.read_blk64			= ufs_read_blk64,
+	.write_blk64		= ufs_write_blk64,
+	.discard			= ufs_discard,
+	.cache_readahead	= ufs_cache_readahead,
+	.zeroout			= ufs_zeroout,
 };
 
-photon::fs::IFile *image_file;
+photon::fs::IFile *ufs_file;
 
 struct unix_private_data {
 	int	magic;
@@ -244,7 +245,7 @@ struct unix_private_data {
 	struct struct_io_stats io_stats;
 };
 
-static errcode_t lsmt_open(const char *name, int flags, io_channel *channel)
+static errcode_t ufs_open(const char *name, int flags, io_channel *channel)
 {
 	io_channel	io = NULL;
 	struct unix_private_data *data = NULL;
@@ -285,7 +286,7 @@ static errcode_t lsmt_open(const char *name, int flags, io_channel *channel)
 }
 
 
-static errcode_t lsmt_close(io_channel channel) {
+static errcode_t ufs_close(io_channel channel) {
 	LOG_INFO("lsmt close");
 	return ext2fs_free_mem(&channel);
 }
@@ -300,14 +301,14 @@ static errcode_t set_blksize(io_channel channel, int blksize) {
 // 	return (int)channel->private_data;
 // }
 
-static errcode_t lsmt_read_blk(io_channel channel, unsigned long block, int count, void *buf) {
+static errcode_t ufs_read_blk(io_channel channel, unsigned long block, int count, void *buf) {
 	// int disk_id = get_disk_id(channel);
 	// disk_id 没什么用？
-	// LOG_INFO("lsmt_read_blk block size=`, ", channel->block_size, VALUE(block), VALUE(count));
+	// LOG_INFO("ufs_read_blk block size=`, ", channel->block_size, VALUE(block), VALUE(count));
 	off_t offset = (ext2_loff_t) block * channel->block_size;
 	ssize_t size = count < 0 ? -count :  (ext2_loff_t) count * channel->block_size;
 	// LOG_INFO("read ", VALUE(offset), VALUE(size));
-	auto res = image_file->pread(buf, size, offset);
+	auto res = ufs_file->pread(buf, size, offset);
 	if (res == size) {
 		return 0;
 	}
@@ -315,16 +316,16 @@ static errcode_t lsmt_read_blk(io_channel channel, unsigned long block, int coun
 	return -1;
 }
 
-static errcode_t lsmt_read_blk64(io_channel channel, unsigned long long block, int count, void *buf) {
-	return lsmt_read_blk(channel, block, count, buf);
+static errcode_t ufs_read_blk64(io_channel channel, unsigned long long block, int count, void *buf) {
+	return ufs_read_blk(channel, block, count, buf);
 }
 
-static errcode_t lsmt_write_blk(io_channel channel, unsigned long block, int count, const void *buf) {
-	// LOG_INFO("lsmt_write_blk block size=`, ", channel->block_size, VALUE(block), VALUE(count));
+static errcode_t ufs_write_blk(io_channel channel, unsigned long block, int count, const void *buf) {
+	// LOG_INFO("ufs_write_blk block size=`, ", channel->block_size, VALUE(block), VALUE(count));
 	off_t offset = (ext2_loff_t) block * channel->block_size;
 	ssize_t size = count < 0 ? -count :  (ext2_loff_t) count * channel->block_size;
 	// LOG_INFO("write ", VALUE(offset), VALUE(size));
-	auto res = image_file->pwrite(buf, size, offset);
+	auto res = ufs_file->pwrite(buf, size, offset);
 	if (res == size) {
 		return 0;
 	}
@@ -332,23 +333,23 @@ static errcode_t lsmt_write_blk(io_channel channel, unsigned long block, int cou
 	return -1;
 }
 
-static errcode_t lsmt_write_blk64(io_channel channel, unsigned long long block, int count, const void *buf) {
-	return lsmt_write_blk(channel, block, count, buf);
+static errcode_t ufs_write_blk64(io_channel channel, unsigned long long block, int count, const void *buf) {
+	return ufs_write_blk(channel, block, count, buf);
 }
 
-static errcode_t lsmt_flush(io_channel channel) {
+static errcode_t ufs_flush(io_channel channel) {
 	return 0;
 }
 
-static errcode_t lsmt_discard(io_channel channel, unsigned long long block, unsigned long long count) {
+static errcode_t ufs_discard(io_channel channel, unsigned long long block, unsigned long long count) {
 	return 0;
 }
 
-static errcode_t lsmt_cache_readahead(io_channel channel, unsigned long long block, unsigned long long count) {
+static errcode_t ufs_cache_readahead(io_channel channel, unsigned long long block, unsigned long long count) {
 	return 0;
 }
 
-static errcode_t lsmt_zeroout(io_channel channel, unsigned long long block, unsigned long long count) {
+static errcode_t ufs_zeroout(io_channel channel, unsigned long long block, unsigned long long count) {
 	return 0;
 }
 
@@ -356,64 +357,10 @@ struct struct_ext2_filsys *fs;
 
 int init_img() {
 	char path[] = "/home/zhuangbowei.zbw/tmp/ext2fs/test.img";
-	image_file = photon::fs::open_localfile_adaptor(path, O_RDWR, 0644, 0);
-	if (!image_file) {
+	ufs_file = photon::fs::open_localfile_adaptor(path, O_RDWR, 0644, 0);
+	if (!ufs_file) {
 		LOG_ERRNO_RETURN(0, -1, "failed to open `", path);
 	}
-	return 0;
-}
-
-int init_lsmt() {
-	std::vector<std::string> lowers_fn;
-	std::vector<photon::fs::IFile*> lower_files;
-
-	lowers_fn.emplace_back("/root/u-overlaybd/ext4_64");
-
-	for (int i = 0; i < 1; i ++) {
-		auto file = photon::fs::open_localfile_adaptor(lowers_fn[i].c_str(), O_RDONLY, 0644, 0);
-		if (!file) {
-			LOG_ERROR("failed to open `", lowers_fn[i]);
-			return -1;
-		}
-		if (ZFile::is_zfile(file) == 1) {
-			auto zf = ZFile::zfile_open_ro(file, false, true);
-        	if (!zf) {
-            	LOG_ERRNO_RETURN(0, -1, "zfile_open_ro failed");
-        	}
-			file = zf;
-		}
-		lower_files.emplace_back(file);
-	}
-
-
-
-	auto lower = LSMT::open_files_ro((photon::fs::IFile **)&(lower_files[0]), lower_files.size(), false);
-    if (!lower) {
-        LOG_ERROR("LSMT::open_files_ro(files, `, `) return NULL", lower_files.size(), false);
-        return -1;
-    }
-
-	auto data_file = photon::fs::open_localfile_adaptor("/root/u-overlaybd/rw_data", O_RDWR, 0644, 0);
-    if (!data_file) {
-        LOG_ERROR("open rw data failed");
-        return -1;
-    }
-
-    auto idx_file = photon::fs::open_localfile_adaptor("/root/u-overlaybd/rw_index", O_RDWR, 0644, 0);
-    if (!idx_file) {
-        LOG_ERROR("open rw index failed");
-        return -1;
-    }
-	auto upper = LSMT::open_file_rw(data_file, idx_file, true);
-
-	auto stack_file = LSMT::stack_files(upper, lower, true, false);
-    if (!stack_file) {
-        LOG_ERROR("stack_files failed");
-     	return -1;
-    }
-	// image_file = stack_file;
-	image_file = photon::fs::new_aligned_file_adaptor(stack_file, 4096, true, true);
-
 	return 0;
 }
 
@@ -1509,7 +1456,7 @@ errcode_t do_ext2fs_mknod(ext2_filsys fs, const char *path,
 	return retval;
 }
 
-int main() {
+int test() {
 	photon::init(photon::INIT_EVENT_DEFAULT, photon::INIT_IO_DEFAULT);
 	set_log_output_level(1);
 
@@ -1569,7 +1516,7 @@ int main() {
 	// if (ret) {
 	// 	LOG_ERRNO_RETURN(0, -1, "failed do_ext2fs_symlink, ret=`", ret);
 	// }
-	
+
 	char buf[4096];
 	for (int i = 0; i < 5; i++) buf[i] = 'y';
 	long n = do_ext2fs_write(file, O_RDWR | O_APPEND, buf, 5, 0);
@@ -1629,11 +1576,8 @@ class UserSpaceFile : public photon::fs::IFile {
 
 class UserSpaceFileSystem : public photon::fs::IFileSystem {
     public:
-		UserSpaceFileSystem(const char *image_json) {
-			// TBD resolve json
-		}
 		UserSpaceFileSystem(IFile *_image_file) {
-			image_file = _image_file;
+			ufs_file = _image_file;
 			errcode_t ret = ext2fs_open(
 				"lsmt-image",
 				EXT2_FLAG_RW,				// flags
@@ -1652,38 +1596,65 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 				return;
 			}
 		}
-		IFile* open(const char *pathname, int flags, mode_t mode) {
+		IFile* open(const char *pathname, int flags, mode_t mode) override {
 			long ret = do_ext2fs_open_file(ext2_fs, pathname, flags, mode);
 			if (ret < 0) {
 				LOG_ERROR("failed do_ext2fs_open_file, ret=`", ret);
 			}
 			return new UserSpaceFile((ext2_file_t) ret);
 		}
-		int mkdir(const char *pathname, mode_t mode) {
+		IFile* open(const char *pathname, int flags) override {
+			return open(pathname, flags, 0666);
+		}
+
+		int mkdir(const char *pathname, mode_t mode) override {
 			return do_ext2fs_mkdir(fs, pathname, mode);
 		}
-		int rmdir(const char *pathname) {
+		int rmdir(const char *pathname) override {
 			return do_ext2fs_rmdir(fs, pathname);
 		}
-		int symlink(const char *oldname, const char *newname) {
+		int symlink(const char *oldname, const char *newname) override {
 			return do_ext2fs_symlink(fs, oldname, newname);
 		}
-		int link(const char *oldname, const char *newname) {
+		int link(const char *oldname, const char *newname) override{
 			return do_ext2fs_link(fs, oldname, newname);
 		}
-		int rename(const char *oldname, const char *newname) {
+		int rename(const char *oldname, const char *newname) override{
 			return do_ext2fs_rename(fs, oldname, newname);
 		}
-		int unlink(const char *filename) {
+		int unlink(const char *filename) override{
 			return do_ext2fs_unlink(fs, filename);
 		}
-		int utime(const char *path, const struct utimbuf *file_times) {
+		int utime(const char *path, const struct utimbuf *file_times) override{
 			// TBD
 			return 0;
 		}
-        int mknod(const char *path, mode_t mode, dev_t dev) {
+        int mknod(const char *path, mode_t mode, dev_t dev) override{
 			return do_ext2fs_mknod(fs, path, mode, dev);
 		}
+
+		IFileSystem* filesystem() {
+			return this;
+		}
+
+		UNIMPLEMENTED_POINTER(IFile *creat(const char *, mode_t) override);
+		UNIMPLEMENTED(ssize_t readlink(const char *filename, char *buf, size_t bufsize) override);
+		UNIMPLEMENTED(int chmod(const char *, mode_t) override);
+    	UNIMPLEMENTED(int chown(const char *, uid_t, gid_t) override);
+		UNIMPLEMENTED(int lchown(const char *pathname, uid_t owner, gid_t group) override);
+		UNIMPLEMENTED(int statfs(const char *path, struct statfs *buf) override);
+    	UNIMPLEMENTED(int statvfs(const char *path, struct statvfs *buf) override);
+		UNIMPLEMENTED(int lstat(const char *path, struct stat *buf) override);
+		UNIMPLEMENTED(int stat(const char *path, struct stat *buf) override);
+		UNIMPLEMENTED(int access(const char *pathname, int mode) override);
+    	UNIMPLEMENTED(int truncate(const char *path, off_t length) override);
+		UNIMPLEMENTED(int syncfs() override);
+		UNIMPLEMENTED_POINTER(DIR *opendir(const char *) override);
 	private:
 		ext2_filsys ext2_fs;
 };
+
+
+photon::fs::IFileSystem* new_userspace_fs(photon::fs::IFile *file) {
+	return new UserSpaceFileSystem(file);
+}

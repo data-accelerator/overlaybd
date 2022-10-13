@@ -10,9 +10,14 @@ add_executable(overlaybd-zfile overlaybd-zfile.cpp)
 target_include_directories(overlaybd-zfile PUBLIC ${PHOTON_INCLUDE_DIR})
 target_link_libraries(overlaybd-zfile photon_static overlaybd_lib)
 
+add_executable(overlaybd-apply overlaybd-apply.cpp)
+target_include_directories(overlaybd-apply PUBLIC ${PHOTON_INCLUDE_DIR})
+target_link_libraries(overlaybd-apply photon_static overlaybd_lib userfs_lib overlaybd_image_lib)
+
 install(TARGETS
     overlaybd-commit
     overlaybd-create
     overlaybd-zfile
+    overlaybd-apply
     DESTINATION /opt/overlaybd/bin
 )
