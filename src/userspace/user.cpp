@@ -729,6 +729,47 @@ errcode_t do_ext2fs_mknod(ext2_filsys fs, const char *path, unsigned int st_mode
 	return retval;
 }
 
+int do_ext2fs_stat(ext2_filsys fs, ext2_ino_t ino, struct stat *statbuf) {
+	struct ext2_inode_large inode;
+	dev_t fakedev = 0;
+	errcode_t err;
+	int ret = 0;
+	struct timespec tv;
+
+	memset(&inode, 0, sizeof(inode));
+	err = ext2fs_read_inode_full(fs, ino, (struct ext2_inode *)&inode,
+				     sizeof(inode));
+	if (err)
+		return translate_error(fs, ino, err);
+
+	memcpy(&fakedev, fs->super->s_uuid, sizeof(fakedev));
+	statbuf->st_dev = fakedev;
+	statbuf->st_ino = ino;
+	statbuf->st_mode = inode.i_mode;
+	statbuf->st_nlink = inode.i_links_count;
+	statbuf->st_uid = inode_uid(inode);
+	statbuf->st_gid = inode_gid(inode);
+	statbuf->st_size = EXT2_I_SIZE(&inode);
+	statbuf->st_blksize = fs->blocksize;
+	statbuf->st_blocks = ext2fs_get_stat_i_blocks(fs,
+						(struct ext2_inode *)&inode);
+	EXT4_INODE_GET_XTIME(i_atime, &tv, &inode);
+	statbuf->st_atime = tv.tv_sec;
+	EXT4_INODE_GET_XTIME(i_mtime, &tv, &inode);
+	statbuf->st_mtime = tv.tv_sec;
+	EXT4_INODE_GET_XTIME(i_ctime, &tv, &inode);
+	statbuf->st_ctime = tv.tv_sec;
+	if (LINUX_S_ISCHR(inode.i_mode) ||
+	    LINUX_S_ISBLK(inode.i_mode)) {
+		if (inode.i_block[0])
+			statbuf->st_rdev = inode.i_block[0];
+		else
+			statbuf->st_rdev = inode.i_block[1];
+	}
+
+	return ret;
+}
+
 
 class UserSpaceFile : public photon::fs::IFile {
 	public:
@@ -833,6 +874,7 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			if (!file) {
 				return -1;
 			}
+			DEFER(ext2fs_file_close(file));
 			tm.tv_sec = file_times->actime;
 			update_xtime(file, true, false, false, &tm);
 			tm.tv_sec = file_times->modtime;
@@ -849,6 +891,7 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			if (!file) {
 				return -1;
 			}
+			DEFER(ext2fs_file_close(file));
 			tm = {tv[0].tv_sec, tv[0].tv_usec};
 			update_xtime(file, true, false, false, &tm);
 			tm = {tv[1].tv_sec, tv[1].tv_usec};
@@ -880,6 +923,20 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			DEFER({delete file;});
 			return file->fchmod(mode);
 		}
+		int stat(const char *path, struct stat *buf) override{
+			ext2_ino_t ino = string_to_inode(fs, path, 1);
+			if (!ino) {
+				return -1;
+			}
+			return do_ext2fs_stat(fs, ino, buf);
+		}
+		int lstat(const char *path, struct stat *buf) override{
+			ext2_ino_t ino = string_to_inode(fs, path, 0);
+			if (!ino) {
+				return -1;
+			}
+			return do_ext2fs_stat(fs, ino, buf);
+		}
 
 		IFileSystem* filesystem() {
 			return this;
@@ -889,8 +946,6 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 		UNIMPLEMENTED(ssize_t readlink(const char *filename, char *buf, size_t bufsize) override);
 		UNIMPLEMENTED(int statfs(const char *path, struct statfs *buf) override);
     	UNIMPLEMENTED(int statvfs(const char *path, struct statvfs *buf) override);
-		UNIMPLEMENTED(int lstat(const char *path, struct stat *buf) override);
-		UNIMPLEMENTED(int stat(const char *path, struct stat *buf) override);
 		UNIMPLEMENTED(int access(const char *pathname, int mode) override);
     	UNIMPLEMENTED(int truncate(const char *path, off_t length) override);
 		UNIMPLEMENTED(int syncfs() override);
