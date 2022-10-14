@@ -16,6 +16,7 @@
 
 #include <photon/common/alog.h>
 #include <photon/fs/localfs.h>
+#include <photon/fs/subfs.h>
 #include <photon/photon.h>
 #include "../overlaybd/lsmt/file.h"
 #include "../overlaybd/zfile/zfile.h"
@@ -69,7 +70,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "failed to create image file\n");
         exit(-1);
     }
-    auto target = new_userspace_fs(imgfile);
+    auto ufs = new_userspace_fs(imgfile);
+    auto target = new_subfs(ufs, "/", true);
 
     auto tarf = open_file(input_path.c_str(), O_RDONLY, 0666);
     auto tar = new Tar(tarf, target, 0);

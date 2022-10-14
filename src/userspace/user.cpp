@@ -20,7 +20,7 @@
 #include "lsmt/file.h"
 #include "zfile/zfile.h"
 
-struct struct_ext2_filsys *fs;
+// struct struct_ext2_filsys *fs;
 
 ext2_file_t do_ext2fs_open_file(ext2_filsys fs, const char* path, unsigned int flags, unsigned int mode) {
 	ext2_ino_t ino = string_to_inode(fs, path, !(flags & O_NOFOLLOW));
@@ -813,7 +813,8 @@ class UserSpaceFile : public photon::fs::IFile {
 
 class UserSpaceFileSystem : public photon::fs::IFileSystem {
     public:
-		UserSpaceFileSystem(IFile *_image_file) {
+		ext2_filsys fs;
+		UserSpaceFileSystem(IFile *_image_file) : fs(nullptr) {
 			ufs_file = _image_file;
 			errcode_t ret = ext2fs_open(
 				"lsmt-image",
@@ -950,11 +951,10 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
     	UNIMPLEMENTED(int truncate(const char *path, off_t length) override);
 		UNIMPLEMENTED(int syncfs() override);
 		UNIMPLEMENTED_POINTER(DIR *opendir(const char *) override);
-	private:
-		ext2_filsys fs;
 };
 
 
 photon::fs::IFileSystem* new_userspace_fs(photon::fs::IFile *file) {
-	return new UserSpaceFileSystem(file);
+	auto ufs = new UserSpaceFileSystem(file);
+	return ufs->fs ? ufs : nullptr;
 }
