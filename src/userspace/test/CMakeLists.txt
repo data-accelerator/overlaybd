@@ -1,0 +1,2 @@
+add_executable(ufs_test test.cpp)
+target_link_libraries(ufs_test photon_static userfs_lib)

@@ -12,3 +12,5 @@ target_link_libraries(userfs_lib
   photon_static
   overlaybd_lib
 )
+
+add_subdirectory(test)
