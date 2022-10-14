@@ -349,12 +349,14 @@ void sigint_handler(int signal = SIGINT) {
 int main(int argc, char **argv) {
     mallopt(M_TRIM_THRESHOLD, 128 * 1024);
 
-    photon::init(photon::INIT_EVENT_DEFAULT, photon::INIT_IO_DEFAULT);
+    photon::init(photon::INIT_EVENT_DEFAULT | photon::INIT_EVENT_SIGNAL, photon::INIT_IO_DEFAULT);
     photon::block_all_signal();
     photon::sync_signal(SIGTERM, &sigint_handler);
     photon::sync_signal(SIGINT, &sigint_handler);
-
-    imgservice = create_image_service();
+    if (argc > 1)
+        imgservice = create_image_service(argv[1]);
+    else
+        imgservice = create_image_service();
     if (imgservice == nullptr) {
         LOG_ERROR("failed to create image service");
         return -1;

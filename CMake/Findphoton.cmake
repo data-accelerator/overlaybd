@@ -4,7 +4,7 @@ set(FETCHCONTENT_QUIET false)
 FetchContent_Declare(
   photon
   GIT_REPOSITORY https://github.com/alibaba/PhotonLibOS.git
-  GIT_TAG 7e0a82f0660600586410aae936bc3721b22b4f87
+  GIT_TAG 7537c7f01fb6042eb13008c3b8018945c4b82be1
 )
 
 if(BUILD_TESTING)
