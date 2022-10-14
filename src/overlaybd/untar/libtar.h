@@ -1,5 +1,5 @@
 /*
-**  Copyright 2000 overlaybd authors
+**  Copyright 2022 overlaybd authors
 **  Copyright 1998-2003 University of Illinois Board of Trustees
 **  Copyright 1998-2003 Mark D. Roth
 **  All rights reserved.
@@ -117,14 +117,14 @@ public:
 private:
 	int read_header();
 	int read_header_internal();
-	
+
 	int extract_file();
 	int extract_regfile(const char *filename);
 	int extract_hardlink(const char *filename);
 	int extract_symlink(const char *filename);
 	int extract_dir(const char *filename);
 	int extract_block_char_fifo(const char *filename);
-	
+
 	int set_file_perms(const char *filename);
 	int convert_whiteout(const char *filename);
 };

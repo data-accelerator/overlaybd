@@ -1,5 +1,5 @@
 /*
-**  Copyright 2000 overlaybd authors
+**  Copyright 2022 overlaybd authors
 **  Copyright 1998-2003 University of Illinois Board of Trustees
 **  Copyright 1998-2003 Mark D. Roth
 **  All rights reserved.
@@ -247,7 +247,7 @@ int Tar::extract_file() {
 
 	// TODO: normalize name, resove symlinks for root + filename
 
-	// ensure parent directory exists or is created. 
+	// ensure parent directory exists or is created.
 	photon::fs::Path p(filename);
 	if (mkdir_hier(fs, p.dirname()) < 0) {
 		return -1;
@@ -315,8 +315,6 @@ int Tar::extract_file() {
 }
 
 int Tar::extract_regfile(const char *filename) {
-	ssize_t i, k;
-	char buf[T_BLOCKSIZE];
 	mode_t mode = header.get_mode();
 	size_t size = header.get_size();
 	uid_t uid = header.get_uid();
@@ -327,6 +325,7 @@ int Tar::extract_regfile(const char *filename) {
 	if (fout == nullptr) {
 		return -1;
 	}
+	DEFER({delete fout;});
 
 #if 0
 	/* change the owner.  (will only work if run as root) */
@@ -341,23 +340,24 @@ int Tar::extract_regfile(const char *filename) {
 		return -1;
 	}
 #endif
-
-	/* extract the file */
-	for (i = size; i > 0; i -= T_BLOCKSIZE) {
-		auto rc = file->read(buf, T_BLOCKSIZE);
-		if (rc != T_BLOCKSIZE) {
-			delete fout;
+	char buf[1024*1024];
+	off_t pos = 0;
+	size_t left = size;
+	while (left > 0) {
+		size_t sz = T_BLOCKSIZE;
+		if (left > 1024 * 1024)
+			sz = 1024 * 1024;
+		else if (left < T_BLOCKSIZE)
+			sz = left;
+		if (file->read(buf, sz) != sz) {
 			LOG_ERRNO_RETURN(0, -1, "failed to read block");
 		}
-
-		/* write block to output file */
-		if (fout->write(buf, ((i > T_BLOCKSIZE) ? T_BLOCKSIZE : i)) < 0) {
-			delete fout;
+		if (fout->pwrite(buf, sz, pos) != sz) {
 			LOG_ERRNO_RETURN(0, -1, "failed to write file");
 		}
+		pos += sz;
+		left -= sz;
 	}
-
-	delete fout;
 	return 0;
 }
 
