@@ -3,92 +3,56 @@
 #include <photon/photon.h>
 #include <photon/fs/localfs.h>
 
-
-int init_img() {
-	char path[] = "/home/zhuangbowei.zbw/tmp/ext2fs/test.img";
-	ufs_file = photon::fs::open_localfile_adaptor(path, O_RDWR, 0644, 0);
-	if (!ufs_file) {
-		LOG_ERRNO_RETURN(0, -1, "failed to open `", path);
-	}
-	return 0;
+void print_stat(struct stat *st) {
+	LOG_INFO(VALUE(st->st_ino), VALUE(st->st_size), VALUE(st->st_nlink));
+	char st_mode[10];
+	sprintf(st_mode, "%07o", st->st_mode);
+	LOG_INFO(VALUE(st_mode));
+	LOG_INFO("atime: `", asctime(localtime(&(st->st_atim.tv_sec))));
+	LOG_INFO("ctime: `", asctime(localtime(&(st->st_ctim.tv_sec))));
+	LOG_INFO("mtime: `", asctime(localtime(&(st->st_mtim.tv_sec))));
 }
 
 int test() {
-	init_img();
-
-	ext2_filsys fs;
-	errcode_t ret = ext2fs_open(
-		"lsmt-image",
-		EXT2_FLAG_RW,				// flags
-		0,							// superblock
-		4096,						// block_size
-		&struct_ufs_manager,		// io manager
-		&fs							// ret_fs
-	);
-	if (ret) {
-		LOG_ERRNO_RETURN(0, -1, "failed to ext2fs_open, ret=`", ret);
+	char path[] = "/home/zhuangbowei.zbw/tmp/ext2fs/test.img";
+	photon::fs::IFile *image_file = photon::fs::open_localfile_adaptor(path, O_RDWR, 0644, 0);
+	if (!image_file) {
+		LOG_ERRNO_RETURN(0, -1, "failed to open `", path);
 	}
-
-	ret = ext2fs_read_bitmaps(fs);
-	if (ret) {
-		LOG_ERRNO_RETURN(0, -1, "failed ext2fs_read_bitmaps, ret=`", ret);
+	photon::fs::IFileSystem *fs = new_userspace_fs(image_file);
+	if (!fs) {
+		LOG_ERRNO_RETURN(0, -1, "failed open fs");
 	}
-
-	// ret = do_ext2fs_mknod(fs, "/testblk-1", S_IFBLK | 0644, makedev(240, 0));
-	// if (ret) {
-	// 	LOG_ERRNO_RETURN(0, -1, "failed do_ext2fs_mknod, ret=`", ret);
-	// }
-
-	// ret = do_ext2fs_rename(fs, "/todir", "/toodir");
-	// if (ret) {
-	// 	LOG_ERRNO_RETURN(0, -1, "failed rename, ret=`", ret);
-	// }
-
-	// ret = do_ext2fs_unlink(fs, "/xx");
-	// if (ret) {
-	// 	LOG_ERRNO_RETURN(0, -1, "failed do_ext2fs_unlink");
-	// }
-
-	ext2_file_t file = (ext2_file_t) do_ext2fs_open_file(fs, "/toodir/yy", O_CREAT | O_RDWR, 0644);
+	DEFER({delete fs;});
+	photon::fs::IFile *file = fs->open("/to", O_RDONLY);
 	if (!file) {
-		LOG_ERRNO_RETURN(0, -1, "failed to do_ext2fs_open_file, ret=`", (errcode_t) file);
+		LOG_ERRNO_RETURN(0, -1, "failed open file");
 	}
-
-	// LOG_INFO(VALUE(1377514 & 0xFFFF));
-	// ret = do_ext2fs_chown(file, 1377514, 100);
-	// if (ret) {
-	// 	LOG_ERRNO_RETURN(0, -1, "failed do_ext2fs_chown, ret=`", ret);
-	// }
-
-	// ret = do_ext2fs_chmod(file, 0755);
-	// if (ret) {
-	// 	LOG_ERRNO_RETURN(0, -1, "failed do_ext2fs_chmod, ret=`", ret);
-	// }
-
-	// ret = do_ext2fs_symlink(fs, "/todir", "/xxdir");
-	// if (ret) {
-	// 	LOG_ERRNO_RETURN(0, -1, "failed do_ext2fs_symlink, ret=`", ret);
-	// }
-
-	char buf[4096];
-	for (int i = 0; i < 5; i++) buf[i] = 'y';
-	long n = do_ext2fs_write(file, O_RDWR | O_APPEND, buf, 5, 0);
-    if (n < 0) {
-		LOG_ERRNO_RETURN(0, -1, "failed to do_ext2fs_write");
+	DEFER({delete file;});
+	char buf[10];
+	int ret = file->pread(buf, 5, 0);
+	buf[5] = '\0';
+	if (ret < 0) {
+		LOG_ERRNO_RETURN(-ret, -1, "failed read file");
 	}
-	LOG_INFO("write ` bytes", n);
+	LOG_INFO("read ` bytes: `", ret, buf);
 
-	ret = ext2fs_file_close(file);
+	struct stat st;
+	ret = fs->lstat("/todir", &st);
 	if (ret) {
-		LOG_ERROR("failed to ext2fs_file_close");
-		return -1;
+		LOG_ERRNO_RETURN(-ret, -1, "failed stat");
 	}
+	print_stat(&st);
+	
+	// ret = fs->link("/todir", "/yydir");
+	// if (ret) {
+	// 	LOG_ERRNO_RETURN(-ret, -1, "failed link");
+	// }
 
-	ret = ext2fs_close(fs);
-	if (ret) {
-		LOG_ERROR("failed to ext2fs_close");
-		return -1;
-	}
+	// ret = fs->mkdir("/dir-1", 0755);
+	// if (ret) {
+	// 	LOG_ERRNO_RETURN(-ret, -1, "failed mkdir");
+	// }
 
 	return 0;
 }
