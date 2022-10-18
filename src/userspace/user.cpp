@@ -771,6 +771,33 @@ int do_ext2fs_stat(ext2_filsys fs, ext2_ino_t ino, struct stat *statbuf) {
 	return ret;
 }
 
+int do_ext2fs_readdir(ext2_filsys fs, const char* path, std::vector<::dirent> *dirs) {
+	ext2_ino_t ino = string_to_inode(fs, path, 1);
+	if (ino == 0) {
+		return -ENOENT;
+	}
+	ext2_file_t file;
+	errcode_t ret = ext2fs_file_open(
+		fs,
+		ino, // inode,
+		0, // flags TODO
+		&file
+	);
+	if (ret) return -ret;
+	ret = ext2fs_check_directory(fs, ino);
+	if (ret) return -ret;
+	auto block_buf = (char *)malloc(fs->blocksize);
+	ret = ext2fs_dir_iterate(
+		fs,
+		ino,
+		0,	// flags
+		block_buf,
+		copy_dirent_to_result,
+		(void*)dirs
+	);
+	free(block_buf);
+	return -ret;
+}
 
 class UserSpaceFile : public photon::fs::IFile {
 	public:
@@ -810,6 +837,51 @@ class UserSpaceFile : public photon::fs::IFile {
     	UNIMPLEMENTED(ssize_t writev(const struct iovec *iov, int iovcnt) override);
 	private:
 		ext2_file_t file;
+};
+
+class UserSpaceDIR : public photon::fs::DIR
+{
+public:
+	std::vector<::dirent> m_dirs;
+    ::dirent* direntp;
+    long loc;
+	UserSpaceDIR(std::vector<::dirent> &dirs) : loc(0) {
+		m_dirs = std::move(dirs);
+		next();
+	}
+	virtual ~UserSpaceDIR() override {
+		closedir();
+	}
+	virtual int closedir() override {
+		if (!m_dirs.empty()) {
+			m_dirs.clear();
+		}
+		return 0;
+	}
+	virtual dirent* get() override {
+		return direntp;
+	}
+	virtual int next() override {
+		if (!m_dirs.empty()) {
+			if (loc < m_dirs.size()) {
+				direntp = &m_dirs[loc++];
+			} else {
+				direntp = nullptr;
+			}
+		}
+		return direntp != nullptr ? 1 : 0;
+	}
+	virtual void rewinddir() override {
+		loc = 0;
+		next();
+	}
+	virtual void seekdir(long loc) override {
+		this->loc = loc;
+		next();
+	}
+	virtual long telldir() override {
+		return loc;
+	}
 };
 
 class UserSpaceFileSystem : public photon::fs::IFileSystem {
@@ -945,6 +1017,12 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			return do_ext2fs_stat(fs, ino, buf);
 		}
 
+		photon::fs::DIR *opendir(const char *path) override {
+			std::vector<::dirent> dirs;
+			auto ret = do_ext2fs_readdir(fs, path, &dirs);
+			return new UserSpaceDIR(dirs);
+		}
+
 		IFileSystem* filesystem() {
 			return this;
 		}
@@ -956,9 +1034,7 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 		UNIMPLEMENTED(int access(const char *pathname, int mode) override);
     	UNIMPLEMENTED(int truncate(const char *path, off_t length) override);
 		UNIMPLEMENTED(int syncfs() override);
-		UNIMPLEMENTED_POINTER(DIR *opendir(const char *) override);
 };
-
 
 photon::fs::IFileSystem* new_userspace_fs(photon::fs::IFile *file) {
 	auto ufs = new UserSpaceFileSystem(file);

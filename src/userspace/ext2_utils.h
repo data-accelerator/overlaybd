@@ -1,5 +1,6 @@
 #include <ext2fs/ext2fs.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <photon/common/alog.h>
 
 static int __translate_error(ext2_filsys fs, errcode_t err, ext2_ino_t ino,
@@ -586,4 +587,49 @@ blk64_t ext2fs_get_stat_i_blocks(ext2_filsys fs,
 			ret *= (fs->blocksize / 512);
 	}
 	return ret;
+}
+
+unsigned char ext2_file_type_to_d_type(int type) {
+	switch(type) {
+		case EXT2_FT_UNKNOWN:
+			return DT_UNKNOWN;
+		case EXT2_FT_REG_FILE:
+			return DT_REG;
+		case EXT2_FT_DIR:
+			return DT_DIR;
+		case EXT2_FT_CHRDEV:
+			return DT_CHR;
+		case EXT2_FT_BLKDEV:
+			return DT_BLK;
+		case EXT2_FT_FIFO:
+			return DT_FIFO;
+		case EXT2_FT_SOCK:
+			return DT_SOCK;
+		case EXT2_FT_SYMLINK:
+			return DT_LNK;
+		default:
+			return DT_UNKNOWN;
+	}
+}
+
+int array_push_dirent(std::vector<dirent> *dirs, struct ext2_dir_entry *dir, size_t len) {
+	struct dirent tmpdir;
+	tmpdir.d_ino = (ino_t)dir->inode;
+	tmpdir.d_off = 0;	// ?
+	tmpdir.d_reclen = dir->rec_len;
+	tmpdir.d_type = ext2_file_type_to_d_type(ext2fs_dirent_file_type(dir));
+	memset(tmpdir.d_name, 0, sizeof(tmpdir.d_name));
+	memcpy(tmpdir.d_name, dir->name, len);
+	dirs->emplace_back(tmpdir);
+	LOG_DEBUG(VALUE(tmpdir.d_ino), VALUE(tmpdir.d_reclen), VALUE(tmpdir.d_type), VALUE(tmpdir.d_name), VALUE(len));
+	return 0;
+}
+
+int copy_dirent_to_result(struct ext2_dir_entry *dirent, int offset, int blocksize, char *buf, void *priv_data) {
+	size_t len = ext2fs_dirent_name_len(dirent);
+	if ((strncmp(dirent->name, ".", len) != 0) &&
+		(strncmp(dirent->name, "..", len) != 0)) {
+		array_push_dirent((std::vector<::dirent> *)priv_data, dirent, len);
+	}
+	return 0;
 }
