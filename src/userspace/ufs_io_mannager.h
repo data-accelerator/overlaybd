@@ -86,7 +86,7 @@ static errcode_t ufs_open(const char *name, int flags, io_channel *channel) {
 
 
 static errcode_t ufs_close(io_channel channel) {
-	LOG_INFO("lsmt close");
+	LOG_INFO("ufs close");
 	return ext2fs_free_mem(&channel);
 }
 

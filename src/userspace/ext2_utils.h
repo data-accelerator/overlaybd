@@ -415,6 +415,7 @@ static int __translate_error(ext2_filsys fs, errcode_t err, ext2_ino_t ino,
 		break;
 	case EXT2_ET_TDB_ERR_EXISTS:
 	case EXT2_ET_FILE_EXISTS:
+	case EXT2_ET_DIR_EXISTS:
 		ret = -EEXIST;
 		break;
 	case EXT2_ET_MMP_FAILED:
@@ -446,9 +447,9 @@ no_translation:
 		return ret;
 
 	if (ino)
-		fprintf(stderr, "lsmt_ext2fs: (inode #%d) at %s:%d.", ino, file, line);
+		LOG_DEBUG("ext2fs: (inode #`) at `:`, ecode `.", ino, file, line, err);
 	else
-		fprintf(stderr, "lsmt_ext2fs: at %s:%d.", file, line);
+		LOG_DEBUG("ext2fs: at `:`, ecode `.", file, line, err);
 
 	ext2fs_mark_super_dirty(fs);
 	ext2fs_flush(fs);
@@ -503,18 +504,19 @@ static ext2_ino_t get_parent_dir_ino(ext2_filsys fs, const char* path) {
 	unsigned int parent_len = last_slash - path + 1;
 	char* parent_path = strndup(path, parent_len);
 	ext2_ino_t parent_ino = string_to_inode(fs, parent_path, 1);
+	// LOG_DEBUG(VALUE(path), VALUE(parent_path), VALUE(parent_ino));
 	free(parent_path);
 	return parent_ino;
 }
 
 static char* get_filename(const char* path) {
 	char* last_slash = strrchr((char*)path, (int)'/');
-	if (last_slash == NULL) {
-		return NULL;
+	if (last_slash == nullptr) {
+		return nullptr;
 	}
 	char* filename = last_slash + 1;
 	if (strlen(filename) == 0) {
-		return NULL;
+		return nullptr;
 	}
 	return filename;
 }
