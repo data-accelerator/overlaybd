@@ -5,6 +5,7 @@ target_include_directories(untar_lib PUBLIC
     ${PHOTON_INCLUDE_DIR}
 )
 
-#if(BUILD_TESTING)
+# if(BUILD_TESTING)
 #  add_subdirectory(test)
-#endif()
+# endif()
+add_subdirectory(test2)

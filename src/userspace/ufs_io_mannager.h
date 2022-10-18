@@ -45,8 +45,7 @@ struct unix_private_data {
 	struct struct_io_stats io_stats;
 };
 
-static errcode_t ufs_open(const char *name, int flags, io_channel *channel)
-{
+static errcode_t ufs_open(const char *name, int flags, io_channel *channel) {
 	io_channel	io = NULL;
 	struct unix_private_data *data = NULL;
 	errcode_t	retval;
@@ -87,7 +86,7 @@ static errcode_t ufs_open(const char *name, int flags, io_channel *channel)
 
 
 static errcode_t ufs_close(io_channel channel) {
-	LOG_INFO("lsmt close");
+	LOG_INFO("ufs close");
 	return ext2fs_free_mem(&channel);
 }
 

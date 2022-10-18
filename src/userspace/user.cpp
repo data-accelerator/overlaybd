@@ -20,11 +20,11 @@
 #include "lsmt/file.h"
 #include "zfile/zfile.h"
 
-struct struct_ext2_filsys *fs;
+// struct struct_ext2_filsys *fs;
 
 ext2_file_t do_ext2fs_open_file(ext2_filsys fs, const char* path, unsigned int flags, unsigned int mode) {
 	ext2_ino_t ino = string_to_inode(fs, path, !(flags & O_NOFOLLOW));
-	LOG_INFO(VALUE(ino));
+	LOG_DEBUG(VALUE(path), VALUE(ino));
 	errcode_t ret;
 	if (ino == 0) {
 		if (!(flags & O_CREAT)) {
@@ -47,7 +47,9 @@ ext2_file_t do_ext2fs_open_file(ext2_filsys fs, const char* path, unsigned int f
 	}
 	if (flags & O_TRUNC) {
 		ret = ext2fs_file_set_size2(file, 0);
-		LOG_ERRNO_RETURN(-translate_error(fs, ino, ret), nullptr, "");
+		if (ret) {
+			LOG_ERRNO_RETURN(-translate_error(fs, ino, ret), nullptr, VALUE(ret));
+		}
 	}
 	return file;
 }
@@ -139,16 +141,15 @@ out:
 
 errcode_t do_ext2fs_mkdir(ext2_filsys fs, const char *path, int mode) {
 	ext2_ino_t parent_ino = get_parent_dir_ino(fs, path);
-	LOG_INFO(VALUE(parent_ino));
+	LOG_DEBUG(VALUE(path), VALUE(mode), VALUE(parent_ino));
 	if (parent_ino == 0) {
 		return -ENOTDIR;
 	}
 	char* filename = get_filename(path);
-	if (filename == NULL) {
+	if (filename == nullptr) {
 		// This should never happen.
 		return -EISDIR;
 	}
-	LOG_INFO(VALUE(filename));
 	ext2_ino_t newdir;
 	errcode_t ret;
 	ret = ext2fs_new_inode(
@@ -158,16 +159,16 @@ errcode_t do_ext2fs_mkdir(ext2_filsys fs, const char *path, int mode) {
 		NULL,
 		&newdir
 	);
-	if (ret) return -ret;
-	LOG_INFO(VALUE(newdir));
+	if (ret) return translate_error(fs, 0, ret);
 	ret = ext2fs_mkdir(fs, parent_ino, newdir, filename);
-	if (ret) return -ret;
+	LOG_DEBUG("ext2fs_mkdir", VALUE(filename), VALUE(newdir), VALUE(ret));
+	if (ret) return translate_error(fs, 0, ret);
 	struct ext2_inode inode;
 	ret = ext2fs_read_inode(fs, newdir, &inode);
- if (ret) return -ret;
+	if (ret) return translate_error(fs, 0, ret);
 	inode.i_mode = (mode & ~LINUX_S_IFMT) | LINUX_S_IFDIR;
 	ret = ext2fs_write_inode(fs, newdir, &inode);
-	return -ret;
+	return translate_error(fs, 0, ret);
 }
 
 errcode_t do_ext2fs_rmdir(ext2_filsys fs, const char *path) {
@@ -813,7 +814,8 @@ class UserSpaceFile : public photon::fs::IFile {
 
 class UserSpaceFileSystem : public photon::fs::IFileSystem {
     public:
-		UserSpaceFileSystem(IFile *_image_file) {
+		ext2_filsys fs;
+		UserSpaceFileSystem(IFile *_image_file) : fs(nullptr) {
 			ufs_file = _image_file;
 			errcode_t ret = ext2fs_open(
 				"lsmt-image",
@@ -837,6 +839,7 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 			ext2fs_close(fs);
 		}
 		IFile* open(const char *pathname, int flags, mode_t mode) override {
+			LOG_DEBUG("open ", VALUE(pathname));
 			ext2_file_t file = do_ext2fs_open_file(fs, pathname, flags, mode);
 			if (!file) {
 				return nullptr;
@@ -848,7 +851,11 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
 		}
 
 		int mkdir(const char *pathname, mode_t mode) override {
-			return do_ext2fs_mkdir(fs, pathname, mode);
+			auto ecode = do_ext2fs_mkdir(fs, pathname, mode);
+			if (ecode) {
+				LOG_ERROR_RETURN(-ecode, -1, "mkdir failed, ", VALUE(pathname), VALUE(mode), VALUE(strerror(-ecode)));
+			}
+			return 0;
 		}
 		int rmdir(const char *pathname) override {
 			return do_ext2fs_rmdir(fs, pathname);
@@ -950,11 +957,10 @@ class UserSpaceFileSystem : public photon::fs::IFileSystem {
     	UNIMPLEMENTED(int truncate(const char *path, off_t length) override);
 		UNIMPLEMENTED(int syncfs() override);
 		UNIMPLEMENTED_POINTER(DIR *opendir(const char *) override);
-	private:
-		ext2_filsys fs;
 };
 
 
 photon::fs::IFileSystem* new_userspace_fs(photon::fs::IFile *file) {
-	return new UserSpaceFileSystem(file);
+	auto ufs = new UserSpaceFileSystem(file);
+	return ufs->fs ? ufs : nullptr;
 }

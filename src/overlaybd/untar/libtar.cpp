@@ -213,7 +213,7 @@ int Tar::set_file_perms(const char *filename) {
 }
 
 int Tar::extract_all() {
-	int i;
+	int i, count = 0;
 	unpackedPaths.clear();
 	dirs.clear();
 
@@ -225,6 +225,7 @@ int Tar::extract_all() {
 		if (TH_ISDIR(header)) {
 			dirs.emplace_back(std::make_pair(std::string(get_pathname()), header.get_mtime()));
 		}
+		count++;
 	}
 
 	// change time for all dir
@@ -238,14 +239,20 @@ int Tar::extract_all() {
 		}
 	}
 
+	LOG_DEBUG("extract ` file", count);
+
 	return (i == 1 ? 0 : -1);
 }
 
 int Tar::extract_file() {
 	int i;
-	char *filename = get_pathname();
 
 	// TODO: normalize name, resove symlinks for root + filename
+	std::string npath(get_pathname());
+	if (npath.back() == '/') {
+		npath = npath.substr(0, npath.size() - 1);
+	}
+	const char *filename = npath.c_str();
 
 	// ensure parent directory exists or is created.
 	photon::fs::Path p(filename);
@@ -263,10 +270,6 @@ int Tar::extract_file() {
 	}
 
 	// check file exist
-	std::string npath(filename);
-	if (npath.back() == '/') {
-		npath = npath.substr(0, npath.size() - 1);
-	}
 	struct stat s;
 	if (fs->lstat(npath.c_str(), &s) == 0 || errno != ENOENT) {
 		if (options & TAR_NOOVERWRITE) {
@@ -344,19 +347,21 @@ int Tar::extract_regfile(const char *filename) {
 	off_t pos = 0;
 	size_t left = size;
 	while (left > 0) {
-		size_t sz = T_BLOCKSIZE;
+		size_t rsz = T_BLOCKSIZE;
 		if (left > 1024 * 1024)
-			sz = 1024 * 1024;
-		else if (left < T_BLOCKSIZE)
-			sz = left;
-		if (file->read(buf, sz) != sz) {
+			rsz = 1024 * 1024;
+		else if (left > T_BLOCKSIZE)
+			rsz = left / T_BLOCKSIZE * T_BLOCKSIZE;
+		if (file->read(buf, rsz) != rsz) {
 			LOG_ERRNO_RETURN(0, -1, "failed to read block");
 		}
-		if (fout->pwrite(buf, sz, pos) != sz) {
+		size_t wsz = (left < T_BLOCKSIZE) ? left : rsz;
+		if (fout->pwrite(buf, wsz, pos) != wsz) {
 			LOG_ERRNO_RETURN(0, -1, "failed to write file");
 		}
-		pos += sz;
-		left -= sz;
+		pos += wsz;
+		left -= wsz;
+		LOG_DEBUG(VALUE(rsz), VALUE(wsz), VALUE(pos), VALUE(left));
 	}
 	return 0;
 }
@@ -393,11 +398,7 @@ int Tar::extract_dir(const char *filename) {
 	LOG_DEBUG("  ==> extracting: ` (mode `, directory)\n", filename, mode);
 	if (fs->mkdir(filename, mode) < 0) {
 		if (errno == EEXIST) {
-			if (fs->chmod(filename, mode) < 0) {
-				return -1;
-			} else {
-				return 1;
-			}
+			return 1;
 		} else {
 			return -1;
 		}
