@@ -71,13 +71,21 @@ int main(int argc, char **argv) {
         exit(-1);
     }
     auto ufs = new_userspace_fs(imgfile);
+    if (!ufs) {
+		LOG_ERRNO_RETURN(0, -1, "new ufs failed, `", strerror(errno));
+	}
     auto target = new_subfs(ufs, "/", true);
+    if (!target) {
+		LOG_ERRNO_RETURN(0, -1, "new subfs failed, `", strerror(errno));
+	}
 
     auto tarf = open_file(input_path.c_str(), O_RDONLY, 0666);
     auto tar = new Tar(tarf, target, 0);
     if (tar->extract_all() < 0) {
         fprintf(stderr, "failed to extract\n");
         exit(-1);
+    } else {
+        LOG_INFO("overlaybd-apply done");
     }
 
     delete target;
