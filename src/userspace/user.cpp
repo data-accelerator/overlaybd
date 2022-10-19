@@ -843,7 +843,7 @@ class UserSpaceDIR : public photon::fs::DIR
 {
 public:
 	std::vector<::dirent> m_dirs;
-    ::dirent* direntp;
+    ::dirent* direntp = nullptr;
     long loc;
 	UserSpaceDIR(std::vector<::dirent> &dirs) : loc(0) {
 		m_dirs = std::move(dirs);
